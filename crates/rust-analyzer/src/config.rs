@@ -194,6 +194,10 @@ config_data! {
         /// by changing `#rust-analyzer.cargo.check.invocationStrategy#` and
         /// `#rust-analyzer.cargo.check.invocationLocation#`.
         ///
+        /// If `$saved_file` is part of the command, rust-analyzer will pass
+        /// the absolute path of the saved file to the provided command. This is
+        /// intended to be used with non-Cargo build systems.
+        ///
         /// An example command would be:
         ///
         /// ```bash
