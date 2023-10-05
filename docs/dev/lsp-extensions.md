@@ -1,5 +1,5 @@
 <!---
-lsp/ext.rs hash: 6bc140531b403717
+lsp/ext.rs hash: 4b87939a51106175
 
 If you need to change the above hash to make the test pass, please check if you
 need to adjust this doc as well and ping this issue:
@@ -372,7 +372,7 @@ interface Runnable {
 }
 ```
 
-rust-analyzer supports only one `kind`, `"cargo"`. The `args` for `"cargo"` look like this:
+rust-analyzer supports two `kind`s of runnables, `"cargo"` and `"rustproject"`. The `args` for `"cargo"` look like this:
 
 ```typescript
 {
@@ -382,6 +382,16 @@ rust-analyzer supports only one `kind`, `"cargo"`. The `args` for `"cargo"` look
     executableArgs: string[];
     expectTest?: boolean;
     overrideCargo?: string;
+}
+```
+
+The args for `"jsonproject"` look like:
+
+```typescript
+{
+    workspaceRoot: string;
+    args: string[];
+    expectTest?: boolean;
 }
 ```
 
