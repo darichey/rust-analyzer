@@ -1,13 +1,13 @@
 //! See [RequestDispatcher].
 use std::{
     fmt::{self, Debug},
-    panic, thread,
+    panic,
 };
 
 use ide::Cancelled;
 use lsp_server::ExtractError;
 use serde::{de::DeserializeOwned, Serialize};
-use stdx::thread::ThreadIntent;
+use stdx::{panic_context, thread::ThreadIntent};
 
 use crate::{
     global_state::{GlobalState, GlobalStateSnapshot},
@@ -54,10 +54,8 @@ impl RequestDispatcher<'_> {
         };
         let _guard = tracing::span!(tracing::Level::INFO, "request", method = ?req.method, "request_id" = ?req.id).entered();
         tracing::debug!(?params);
-        let result = {
-            let _pctx = stdx::panic_context::enter(panic_context);
-            f(self.global_state, params)
-        };
+        let _pctx = stdx::panic_context::enter(panic_context);
+        let result = f(self.global_state, params);
         if let Ok(response) = result_to_response::<R>(req.id, result) {
             self.global_state.respond(response);
         }
@@ -83,10 +81,8 @@ impl RequestDispatcher<'_> {
         tracing::debug!(?params);
         let global_state_snapshot = self.global_state.snapshot();
 
-        let result = panic::catch_unwind(move || {
-            let _pctx = stdx::panic_context::enter(panic_context);
-            f(global_state_snapshot, params)
-        });
+        let _pctx = stdx::panic_context::enter(panic_context);
+        let result = panic::catch_unwind(move || f(global_state_snapshot, params));
 
         if let Ok(response) = thread_result_to_response::<R>(req.id, result) {
             self.global_state.respond(response);
@@ -114,10 +110,8 @@ impl RequestDispatcher<'_> {
         self.global_state.task_pool.handle.spawn(ThreadIntent::Worker, {
             let world = self.global_state.snapshot();
             move || {
-                let result = panic::catch_unwind(move || {
-                    let _pctx = stdx::panic_context::enter(panic_context);
-                    f(world, params)
-                });
+                let _pctx = stdx::panic_context::enter(panic_context);
+                let result = panic::catch_unwind(move || f(world, params));
                 match thread_result_to_response::<R>(req.id.clone(), result) {
                     Ok(response) => Task::Response(response),
                     Err(_) => Task::Response(lsp_server::Response::new_err(
@@ -209,10 +203,8 @@ impl RequestDispatcher<'_> {
             &mut self.global_state.fmt_pool.handle
         }
         .spawn(intent, move || {
-            let result = panic::catch_unwind(move || {
-                let _pctx = stdx::panic_context::enter(panic_context);
-                f(world, params)
-            });
+            let _pctx = stdx::panic_context::enter(panic_context);
+            let result = panic::catch_unwind(move || f(world, params));
             match thread_result_to_response::<R>(req.id.clone(), result) {
                 Ok(response) => Task::Response(response),
                 Err(_) => Task::Retry(req),
@@ -254,7 +246,7 @@ impl RequestDispatcher<'_> {
 
 fn thread_result_to_response<R>(
     id: lsp_server::RequestId,
-    result: thread::Result<anyhow::Result<R::Result>>,
+    result: Result<anyhow::Result<R::Result>, Box<dyn std::any::Any + Send + 'static>>,
 ) -> Result<lsp_server::Response, Cancelled>
 where
     R: lsp_types::request::Request,
@@ -264,16 +256,25 @@ where
     match result {
         Ok(result) => result_to_response::<R>(id, result),
         Err(panic) => {
+            let mut message = "request handler panicked".to_owned();
+
             let panic_message = panic
                 .downcast_ref::<String>()
                 .map(String::as_str)
                 .or_else(|| panic.downcast_ref::<&str>().copied());
 
-            let mut message = "request handler panicked".to_owned();
             if let Some(panic_message) = panic_message {
                 message.push_str(": ");
-                message.push_str(panic_message)
+                message.push_str(panic_message);
+                message.push('\n');
             };
+
+            panic_context::with_backtrace(|backtrace| {
+                if let Some(backtrace) = backtrace {
+                    message.push_str("backtrace:\n");
+                    message.push_str(&backtrace.to_string())
+                }
+            });
 
             Ok(lsp_server::Response::new_err(
                 id,
