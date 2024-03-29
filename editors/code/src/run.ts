@@ -114,7 +114,7 @@ export async function createTask(runnable: ra.Runnable, config: Config): Promise
     const args = createArgs(runnable);
 
     const definition: tasks.CargoTaskDefinition = {
-        type: tasks.TASK_TYPE,
+        type: tasks.CARGO_TASK_TYPE,
         command: unwrapUndefinable(args[0]), // run, test, etc...
         args: args.slice(1),
         cwd: runnable.args.workspaceRoot || ".",
