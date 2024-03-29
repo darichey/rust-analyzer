@@ -56,7 +56,7 @@ use serde::{de, Deserialize, Serialize};
 use span::Edition;
 
 use crate::cfg::CfgFlag;
-use crate::ManifestPath;
+use crate::{ManifestPath, TargetKind};
 
 /// Roots and crates that compose this Rust project.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -74,20 +74,37 @@ pub struct ProjectJson {
 /// useful in creating the crate graph.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Crate {
-    pub(crate) display_name: Option<CrateDisplayName>,
+    pub display_name: Option<CrateDisplayName>,
     pub root_module: AbsPathBuf,
-    pub(crate) edition: Edition,
-    pub(crate) version: Option<String>,
-    pub(crate) deps: Vec<Dep>,
-    pub(crate) cfg: Vec<CfgFlag>,
-    pub(crate) target: Option<String>,
-    pub(crate) env: FxHashMap<String, String>,
-    pub(crate) proc_macro_dylib_path: Option<AbsPathBuf>,
-    pub(crate) is_workspace_member: bool,
-    pub(crate) include: Vec<AbsPathBuf>,
-    pub(crate) exclude: Vec<AbsPathBuf>,
-    pub(crate) is_proc_macro: bool,
-    pub(crate) repository: Option<String>,
+    pub edition: Edition,
+    pub version: Option<String>,
+    pub deps: Vec<Dep>,
+    pub cfg: Vec<CfgFlag>,
+    pub target: Option<String>,
+    pub env: FxHashMap<String, String>,
+    pub proc_macro_dylib_path: Option<AbsPathBuf>,
+    pub is_workspace_member: bool,
+    pub include: Vec<AbsPathBuf>,
+    pub exclude: Vec<AbsPathBuf>,
+    pub is_proc_macro: bool,
+    pub repository: Option<String>,
+    pub target_spec: Option<TargetSpec>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TargetSpec {
+    pub manifest_file: AbsPathBuf,
+    pub target_label: String,
+    pub target_kind: TargetKind,
+    pub runnables: Runnables,
+    pub flycheck_command: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Runnables {
+    pub check: Vec<String>,
+    pub run: Vec<String>,
+    pub test: Vec<String>,
 }
 
 impl ProjectJson {
@@ -127,6 +144,20 @@ impl ProjectJson {
                         None => (vec![root_module.parent().unwrap().to_path_buf()], Vec::new()),
                     };
 
+                    let target_spec = match crate_data.target_spec {
+                        Some(spec) => {
+                            let spec = TargetSpec {
+                                manifest_file: absolutize_on_base(spec.manifest_file),
+                                target_label: spec.target_label,
+                                target_kind: spec.target_kind.into(),
+                                runnables: spec.runnables.into(),
+                                flycheck_command: spec.flycheck_command,
+                            };
+                            Some(spec)
+                        }
+                        None => None,
+                    };
+
                     Crate {
                         display_name: crate_data
                             .display_name
@@ -146,6 +177,7 @@ impl ProjectJson {
                         exclude,
                         is_proc_macro: crate_data.is_proc_macro,
                         repository: crate_data.repository,
+                        target_spec,
                     }
                 })
                 .collect(),
@@ -170,6 +202,14 @@ impl ProjectJson {
     /// Returns the path to the project's manifest or root folder, if no manifest exists.
     pub fn manifest_or_root(&self) -> &AbsPath {
         self.manifest.as_ref().map_or(&self.project_root, |manifest| manifest.as_ref())
+    }
+
+    pub fn crate_by_root(&self, root: &AbsPath) -> Option<Crate> {
+        self.crates
+            .iter()
+            .filter(|krate| krate.is_workspace_member)
+            .find(|krate| &krate.root_module == root)
+            .cloned()
     }
 }
 
@@ -200,6 +240,8 @@ struct CrateData {
     is_proc_macro: bool,
     #[serde(default)]
     repository: Option<String>,
+    #[serde(default)]
+    target_spec: Option<TargetSpecData>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -213,6 +255,55 @@ enum EditionData {
     Edition2021,
     #[serde(rename = "2024")]
     Edition2024,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct TargetSpecData {
+    manifest_file: Utf8PathBuf,
+    target_label: String,
+    target_kind: TargetKindData,
+    runnables: RunnablesData,
+    flycheck_command: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct RunnablesData {
+    check: Vec<String>,
+    run: Vec<String>,
+    test: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TargetKindData {
+    Bin,
+    /// Any kind of Cargo lib crate-type (dylib, rlib, proc-macro, ...).
+    Lib,
+    Example,
+    Test,
+    Bench,
+    BuildScript,
+    Other,
+}
+
+impl From<TargetKindData> for TargetKind {
+    fn from(value: TargetKindData) -> Self {
+        match value {
+            TargetKindData::Bin => TargetKind::Bin,
+            TargetKindData::Lib => TargetKind::Lib { is_proc_macro: false },
+            TargetKindData::Example => TargetKind::Example,
+            TargetKindData::Test => TargetKind::Test,
+            TargetKindData::Bench => TargetKind::Bench,
+            TargetKindData::BuildScript => TargetKind::BuildScript,
+            TargetKindData::Other => TargetKind::Other,
+        }
+    }
+}
+
+impl From<RunnablesData> for Runnables {
+    fn from(value: RunnablesData) -> Self {
+        Runnables { check: value.check, run: value.run, test: value.test }
+    }
 }
 
 impl From<EditionData> for Edition {
@@ -235,7 +326,7 @@ impl From<EditionData> for Edition {
 pub struct CrateArrayIdx(pub usize);
 
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
-pub(crate) struct Dep {
+pub struct Dep {
     /// Identifies a crate by position in the crates array.
     #[serde(rename = "crate")]
     pub(crate) krate: CrateArrayIdx,
