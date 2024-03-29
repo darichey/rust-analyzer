@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import type * as lc from "vscode-languageclient";
 import * as ra from "./lsp_ext";
 import * as tasks from "./tasks";
+import * as toolchain from "./toolchain";
 
 import type { CtxInit } from "./ctx";
 import { makeDebugConfig } from "./debug";
@@ -103,32 +104,25 @@ export function prepareEnv(
     return env;
 }
 
+
 export async function createTask(runnable: ra.Runnable, config: Config): Promise<vscode.Task> {
-    let definition: tasks.CargoTaskDefinition | tasks.RustShellTaskDefinition;
+    if (runnable.kind !== "cargo") {
+        // rust-analyzer supports only one kind, "cargo"
+        // do not use tasks.TASK_TYPE here, these are completely different meanings.
 
-    if (runnable.kind === "cargo") {
-        const cargoArgs = runnable.args as ra.CargoRunnable;
-        const args = createCargoArgs(cargoArgs);
-
-        definition = {
-            type: tasks.CARGO_TASK_TYPE,
-            command: args[0], // run, test, etc...
-            args: args.slice(1),
-            cwd: cargoArgs.workspaceRoot || ".",
-            env: prepareEnv(runnable, config.runnablesExtraEnv),
-            overrideCargo: cargoArgs.overrideCargo,
-        } as tasks.CargoTaskDefinition;
-    } else {
-        const projectJsonRunnableArgs = runnable.args as ra.ProjectJsonRunnable;
-
-        definition = {
-            type: tasks.RUST_SHELL_TASK_TYPE,
-            program: "buck2",
-            args: projectJsonRunnableArgs.args,
-            cwd: projectJsonRunnableArgs.workspaceRoot,
-            env: prepareEnv(runnable, config.runnablesExtraEnv),
-        } as tasks.RustShellTaskDefinition;
+        throw `Unexpected runnable kind: ${runnable.kind}`;
     }
+
+    let args = createArgs(runnable);
+
+    const definition: tasks.CargoTaskDefinition = {
+        type: tasks.CARGO_TASK_TYPE,
+        command: unwrapUndefinable(args[0]), // run, test, etc...
+        args: args.slice(1),
+        cwd: runnable.args.workspaceRoot || ".",
+        env: prepareEnv(runnable, config.runnablesExtraEnv),
+        overrideCargo: runnable.args.overrideCargo,
+    };
 
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const target = vscode.workspace.workspaceFolders![0]; // safe, see main activate()
@@ -136,8 +130,7 @@ export async function createTask(runnable: ra.Runnable, config: Config): Promise
         target,
         definition,
         runnable.label,
-        config.problemMatcher,
-        config.cargoRunner,
+        config,
         true,
     );
 
@@ -149,13 +142,13 @@ export async function createTask(runnable: ra.Runnable, config: Config): Promise
     return task;
 }
 
-export function createCargoArgs(runnable: ra.CargoRunnable): string[] {
-    const args = [...runnable.cargoArgs]; // should be a copy!
-    if (runnable.cargoExtraArgs) {
-        args.push(...runnable.cargoExtraArgs); // Append user-specified cargo options.
+export function createArgs(runnable: ra.Runnable): string[] {
+    const args = [...runnable.args.cargoArgs]; // should be a copy!
+    if (runnable.args.cargoExtraArgs) {
+        args.push(...runnable.args.cargoExtraArgs); // Append user-specified cargo options.
     }
-    if (runnable.executableArgs.length > 0) {
-        args.push("--", ...runnable.executableArgs);
+    if (runnable.args.executableArgs.length > 0) {
+        args.push("--", ...runnable.args.executableArgs);
     }
     return args;
 }

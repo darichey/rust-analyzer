@@ -7,12 +7,10 @@ import { Cargo, type ExecutableInfo, getRustcId, getSysroot } from "./toolchain"
 import type { Ctx } from "./ctx";
 import { prepareEnv } from "./run";
 import { unwrapUndefinable } from "./undefinable";
-import { isCargoRunnable } from "./util";
 
 const debugOutput = vscode.window.createOutputChannel("Debug");
 type DebugConfigProvider = (
-    label: string,
-    args: ra.CargoRunnable,
+    config: ra.Runnable,
     executable: string,
     cargoWorkspace: string,
     env: Record<string, string>,
@@ -79,16 +77,12 @@ async function getDebugConfiguration(
     ctx: Ctx,
     runnable: ra.Runnable,
 ): Promise<vscode.DebugConfiguration | undefined> {
-    if (!isCargoRunnable(runnable.args)) {
-        return;
-    }
-
     const editor = ctx.activeRustEditor;
     if (!editor) return;
 
     const knownEngines: Record<string, DebugConfigProvider> = {
-        "vadimcn.vscode-lldb": getCodeLldbDebugConfig,
         "ms-vscode.cpptools": getCCppDebugConfig,
+        "vadimcn.vscode-lldb": getCodeLldbDebugConfig,
         "webfreak.debug": getNativeDebugConfig,
     };
     const debugOptions = ctx.config.debug;
@@ -140,11 +134,7 @@ async function getDebugConfiguration(
     }
 
     const env = prepareEnv(runnable, ctx.config.runnablesExtraEnv);
-    const { executable, workspace: cargoWorkspace } = await getDebugExecutableInfo(
-        runnable.args.workspaceRoot,
-        runnable.args.cargoArgs,
-        env,
-    );
+    const { executable, workspace: cargoWorkspace } = await getDebugExecutableInfo(runnable, env);
     let sourceFileMap = debugOptions.sourceFileMap;
     if (sourceFileMap === "auto") {
         // let's try to use the default toolchain
@@ -159,8 +149,7 @@ async function getDebugConfiguration(
 
     const provider = unwrapUndefinable(knownEngines[debugEngine.id]);
     const debugConfig = provider(
-        runnable.label,
-        runnable.args,
+        runnable,
         simplifyPath(executable),
         cargoWorkspace,
         env,
@@ -188,20 +177,18 @@ async function getDebugConfiguration(
 }
 
 async function getDebugExecutableInfo(
-    workspaceRoot: string | undefined,
-    cargoArgs: string[],
+    runnable: ra.Runnable,
     env: Record<string, string>,
 ): Promise<ExecutableInfo> {
-    const cargo = new Cargo(workspaceRoot || ".", debugOutput, env);
-    const executableInfo = await cargo.executableInfoFromArgs(cargoArgs);
+    const cargo = new Cargo(runnable.args.workspaceRoot || ".", debugOutput, env);
+    const executableInfo = await cargo.executableInfoFromArgs(runnable.args.cargoArgs);
 
     // if we are here, there were no compilation errors.
     return executableInfo;
 }
 
 function getCCppDebugConfig(
-    label: string,
-    args: ra.CargoRunnable,
+    runnable: ra.Runnable,
     executable: string,
     cargoWorkspace: string,
     env: Record<string, string>,
@@ -210,22 +197,17 @@ function getCCppDebugConfig(
     return {
         type: os.platform() === "win32" ? "cppvsdbg" : "cppdbg",
         request: "launch",
-        name: label,
+        name: runnable.label,
         program: executable,
-        args: args.executableArgs,
-        cwd: cargoWorkspace || args.workspaceRoot,
+        args: runnable.args.executableArgs,
+        cwd: cargoWorkspace || runnable.args.workspaceRoot,
         sourceFileMap,
         env,
-        // See https://github.com/rust-lang/rust-analyzer/issues/16901#issuecomment-2024486941
-        osx: {
-            MIMode: "lldb",
-        },
     };
 }
 
 function getCodeLldbDebugConfig(
-    label: string,
-    args: ra.CargoRunnable,
+    runnable: ra.Runnable,
     executable: string,
     cargoWorkspace: string,
     env: Record<string, string>,
@@ -234,10 +216,10 @@ function getCodeLldbDebugConfig(
     return {
         type: "lldb",
         request: "launch",
-        name: label,
+        name: runnable.label,
         program: executable,
-        args: args.executableArgs,
-        cwd: cargoWorkspace || args.workspaceRoot,
+        args: runnable.args.executableArgs,
+        cwd: cargoWorkspace || runnable.args.workspaceRoot,
         sourceMap: sourceFileMap,
         sourceLanguages: ["rust"],
         env,
@@ -245,8 +227,7 @@ function getCodeLldbDebugConfig(
 }
 
 function getNativeDebugConfig(
-    label: string,
-    args: ra.CargoRunnable,
+    runnable: ra.Runnable,
     executable: string,
     cargoWorkspace: string,
     env: Record<string, string>,
@@ -255,11 +236,11 @@ function getNativeDebugConfig(
     return {
         type: "gdb",
         request: "launch",
-        name: label,
+        name: runnable.label,
         target: executable,
         // See https://github.com/WebFreak001/code-debug/issues/359
-        arguments: quote(args.executableArgs),
-        cwd: cargoWorkspace || args.workspaceRoot,
+        arguments: quote(runnable.args.executableArgs),
+        cwd: cargoWorkspace || runnable.args.workspaceRoot,
         env,
         valuesFormatting: "prettyPrinters",
     };
