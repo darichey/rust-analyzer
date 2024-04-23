@@ -141,7 +141,10 @@ where
     S: Subscriber + for<'span> LookupSpan<'span>,
 {
     fn on_new_span(&self, attrs: &Attributes<'_>, id: &Id, ctx: Context<'_, S>) {
-        let span = ctx.span(id).unwrap();
+        let Some(span) = ctx.span(id) else {
+            eprintln!("unknown id on_new_span: {:?}", id);
+            return;
+        };
 
         let data = Data::new(attrs);
         span.extensions_mut().insert(data);
@@ -150,7 +153,10 @@ where
     fn on_event(&self, _event: &Event<'_>, _ctx: Context<'_, S>) {}
 
     fn on_close(&self, id: Id, ctx: Context<'_, S>) {
-        let span = ctx.span(&id).unwrap();
+        let Some(span) = ctx.span(&id) else {
+            eprintln!("unknown id on_close: {:?}", id);
+            return;
+        };
         let data = span.extensions_mut().remove::<Data>().unwrap();
         let mut node = data.into_node(span.name());
 

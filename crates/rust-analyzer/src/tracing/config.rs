@@ -1,13 +1,16 @@
 //! Simple logger that logs either to stderr or to a file, using `tracing_subscriber`
 //! filter syntax and `tracing_appender` for non blocking output.
 
-use std::io;
+use std::{io, sync::OnceLock};
 
 use anyhow::Context;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{
-    filter::Targets, fmt::MakeWriter, layer::SubscriberExt, util::SubscriberInitExt, Layer,
-    Registry,
+    filter::{Filtered, Targets},
+    fmt::{format::DefaultFields, writer::BoxMakeWriter, MakeWriter},
+    layer::{Layered, SubscriberExt},
+    util::SubscriberInitExt as _,
+    Layer, Registry,
 };
 use tracing_tree::HierarchicalLayer;
 
@@ -39,7 +42,7 @@ impl<T> Config<T>
 where
     T: for<'writer> MakeWriter<'writer> + Send + Sync + 'static,
 {
-    pub fn init(self) -> anyhow::Result<()> {
+    pub fn init(self) -> anyhow::Result<ProfilingReloadHandle<T>> {
         let filter: Targets = self
             .filter
             .parse()
@@ -64,14 +67,115 @@ where
                     .with_ansi(false)
                     .with_indent_amount(2)
                     .with_writer(io::stderr)
-                    .with_filter(chalk_filter),
+                    .with_filter(chalk_filter)
+                    .boxed(),
             );
         };
 
-        let profiler_layer = self.profile_filter.map(|spec| hprof::layer(&spec));
+        let (profiler_layer, reload_handle) = tracing_subscriber::reload::Layer::new(
+            self.profile_filter.map(|spec| hprof::layer(&spec).boxed()),
+        );
 
         Registry::default().with(ra_fmt_layer).with(chalk_layer).with(profiler_layer).try_init()?;
+
+        Ok(ProfilingReloadHandle(reload_handle))
+    }
+}
+
+pub struct ProfilingReloadHandle<T>(
+    tracing_subscriber::reload::Handle<
+        std::option::Option<
+            std::boxed::Box<
+                dyn Layer<
+                        Layered<
+                            std::option::Option<
+                                std::boxed::Box<
+                                    dyn Layer<
+                                            Layered<
+                                                Filtered<
+                                                    tracing_subscriber::fmt::Layer<
+                                                        Registry,
+                                                        DefaultFields,
+                                                        tracing_subscriber::fmt::format::Format,
+                                                        T,
+                                                    >,
+                                                    Targets,
+                                                    Registry,
+                                                >,
+                                                Registry,
+                                            >,
+                                        > + Send
+                                        + std::marker::Sync,
+                                >,
+                            >,
+                            Layered<
+                                Filtered<
+                                    tracing_subscriber::fmt::Layer<
+                                        Registry,
+                                        DefaultFields,
+                                        tracing_subscriber::fmt::format::Format,
+                                        T,
+                                    >,
+                                    Targets,
+                                    Registry,
+                                >,
+                                Registry,
+                            >,
+                        >,
+                    > + Send
+                    + std::marker::Sync,
+            >,
+        >,
+        Layered<
+            std::option::Option<
+                std::boxed::Box<
+                    dyn Layer<
+                            Layered<
+                                Filtered<
+                                    tracing_subscriber::fmt::Layer<
+                                        Registry,
+                                        DefaultFields,
+                                        tracing_subscriber::fmt::format::Format,
+                                        T,
+                                    >,
+                                    Targets,
+                                    Registry,
+                                >,
+                                Registry,
+                            >,
+                        > + Send
+                        + std::marker::Sync,
+                >,
+            >,
+            Layered<
+                Filtered<
+                    tracing_subscriber::fmt::Layer<
+                        Registry,
+                        DefaultFields,
+                        tracing_subscriber::fmt::format::Format,
+                        T,
+                    >,
+                    Targets,
+                    Registry,
+                >,
+                Registry,
+            >,
+        >,
+    >,
+);
+
+impl<T> ProfilingReloadHandle<T>
+where
+    T: for<'writer> MakeWriter<'writer> + Send + Sync + 'static,
+{
+    pub fn reload(&self, profile_filter: Option<&String>) -> anyhow::Result<()> {
+        self.0.modify(|layer| {
+            *layer = profile_filter.map(|spec| hprof::layer(&spec).boxed());
+        })?;
 
         Ok(())
     }
 }
+
+pub static PROFILING_RELOAD_HANDLE: OnceLock<ProfilingReloadHandle<BoxMakeWriter>> =
+    OnceLock::new();

@@ -130,6 +130,7 @@ config_data! {
             m.insert("miri".to_owned(), None);
             m
         },
+        server_extraEnv: FxHashMap<String, String> = FxHashMap::default(),
         /// Extra arguments that are passed to every cargo invocation.
         cargo_extraArgs: Vec<String> = vec![],
         /// Extra environment variables that will be set when running cargo, rustc
@@ -1528,6 +1529,10 @@ impl Config {
         let mut extra_env = self.cargo_extraEnv().clone();
         extra_env.extend(self.check_extraEnv().clone());
         extra_env
+    }
+
+    pub fn server_extra_env(&self) -> &FxHashMap<String, String> {
+        self.server_extraEnv()
     }
 
     pub fn lru_parse_query_capacity(&self) -> Option<usize> {

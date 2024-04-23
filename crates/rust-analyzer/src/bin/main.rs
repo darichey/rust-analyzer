@@ -15,7 +15,9 @@ use std::{env, fs, path::PathBuf, process::ExitCode, sync::Arc};
 
 use anyhow::Context;
 use lsp_server::Connection;
-use rust_analyzer::{cli::flags, config::Config, from_json};
+use rust_analyzer::{
+    cli::flags, config::Config, from_json, tracing::config::PROFILING_RELOAD_HANDLE,
+};
 use semver::Version;
 use tracing_subscriber::fmt::writer::BoxMakeWriter;
 use vfs::AbsPathBuf;
@@ -125,7 +127,7 @@ fn setup_logging(log_file_flag: Option<PathBuf>) -> anyhow::Result<()> {
         None => BoxMakeWriter::new(std::io::stderr),
     };
 
-    rust_analyzer::tracing::Config {
+    let reload_handle = rust_analyzer::tracing::Config {
         writer,
         // Deliberately enable all `error` logs if the user has not set RA_LOG, as there is usually
         // useful information in there for debugging.
@@ -134,6 +136,7 @@ fn setup_logging(log_file_flag: Option<PathBuf>) -> anyhow::Result<()> {
         profile_filter: env::var("RA_PROFILE").ok(),
     }
     .init()?;
+    let _ = PROFILING_RELOAD_HANDLE.set(reload_handle);
 
     Ok(())
 }

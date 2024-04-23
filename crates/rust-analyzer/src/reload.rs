@@ -36,6 +36,7 @@ use crate::{
     lsp_ext,
     main_loop::Task,
     op_queue::Cause,
+    tracing::config::PROFILING_RELOAD_HANDLE,
 };
 
 #[derive(Debug)]
@@ -95,6 +96,10 @@ impl GlobalState {
                 self.config.expand_proc_attr_macros(),
                 Durability::HIGH,
             );
+        }
+
+        if let Some(reload_handle) = PROFILING_RELOAD_HANDLE.get() {
+            let _ = reload_handle.reload(self.config.server_extra_env().get("RA_PROFILE"));
         }
     }
 
