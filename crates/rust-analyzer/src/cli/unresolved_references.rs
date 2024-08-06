@@ -62,21 +62,27 @@ impl flags::UnresolvedReferences {
             if !visited_files.contains(&file_id) {
                 let crate_name =
                     module.krate().display_name(db).as_deref().unwrap_or("unknown").to_owned();
-                println!(
-                    "processing crate: {crate_name}, module: {}",
-                    vfs.file_path(file_id.into())
-                );
+                let file_path = vfs.file_path(file_id.into());
+                eprintln!("processing crate: {crate_name}, module: {file_path}",);
+
+                let line_index = db.line_index(file_id.into());
+                let file_text = db.file_text(file_id.into());
 
                 for unresolved_reference in find_unresolved_references(&db, file_id.into()) {
-                    println!("{:?}", unresolved_reference.range);
+                    // println!("{:?}", unresolved_reference.range);
+                    let line_col = line_index.line_col(unresolved_reference.range.start());
+                    let line = line_col.line + 1;
+                    let col = line_col.col + 1;
+                    let text = &file_text[unresolved_reference.range];
+                    println!("{file_path}:{line}:{col}: {text}");
                 }
 
                 visited_files.insert(file_id);
             }
         }
 
-        println!();
-        println!("scan complete");
+        eprintln!();
+        eprintln!("scan complete");
 
         Ok(())
     }
