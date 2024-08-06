@@ -1,13 +1,20 @@
-use hir::{db::HirDatabase, Crate, HirFileIdExt as _, Module};
+use hir::{db::HirDatabase, Crate, HirFileIdExt as _, Module, Semantics};
 use ide::{
-    AnalysisHost, AssistResolveStrategy, Diagnostic, DiagnosticsConfig, HighlightConfig,
-    HlTag::UnresolvedReference, Severity,
+    Analysis, AnalysisHost, AssistResolveStrategy, Diagnostic, DiagnosticsConfig, HighlightConfig,
+    RootDatabase, Severity, TextRange,
 };
-use ide_db::{base_db::SourceDatabaseExt as _, FxHashSet, LineIndexDatabase as _};
+use ide_db::{
+    base_db::SourceDatabaseExt as _, defs::NameRefClass, EditionedFileId, FxHashSet,
+    LineIndexDatabase as _,
+};
 use load_cargo::{load_workspace_at, LoadCargoConfig, ProcMacroServerChoice};
 use project_model::{CargoConfig, RustLibSource};
+use syntax::{ast, AstNode, SyntaxNode, WalkEvent};
+use vfs::FileId;
 
 use crate::cli::flags;
+
+use super::flags::UnresolvedReferences;
 
 const HL_CONFIG: HighlightConfig = HighlightConfig {
     strings: true,
@@ -41,7 +48,6 @@ impl flags::UnresolvedReferences {
         let db = host.raw_database();
         let analysis = host.analysis();
 
-        let mut found_unresolved_reference = false;
         let mut visited_files = FxHashSet::default();
 
         let work = all_modules(db).into_iter().filter(|module| {
@@ -61,12 +67,8 @@ impl flags::UnresolvedReferences {
                     vfs.file_path(file_id.into())
                 );
 
-                for range in analysis.highlight(HL_CONFIG, file_id.into()).unwrap() {
-                    if range.highlight.tag == UnresolvedReference {
-                        found_unresolved_reference = true;
-
-                        println!("{:?}", range.range);
-                    }
+                for unresolved_reference in find_unresolved_references(&db, file_id.into()) {
+                    println!("{:?}", unresolved_reference.range);
                 }
 
                 visited_files.insert(file_id);
@@ -75,11 +77,6 @@ impl flags::UnresolvedReferences {
 
         println!();
         println!("scan complete");
-
-        if found_unresolved_reference {
-            println!();
-            anyhow::bail!("unresolved reference detected")
-        }
 
         Ok(())
     }
@@ -96,4 +93,36 @@ fn all_modules(db: &dyn HirDatabase) -> Vec<Module> {
     }
 
     modules
+}
+
+#[derive(Debug)]
+struct UnresolvedReference {
+    range: TextRange,
+}
+
+fn find_unresolved_references(db: &RootDatabase, file_id: FileId) -> Vec<UnresolvedReference> {
+    let sema = Semantics::new(db);
+    let file_id = sema
+        .attach_first_edition(file_id)
+        .unwrap_or_else(|| EditionedFileId::current_edition(file_id));
+    let file = sema.parse(file_id);
+    let root = file.syntax();
+
+    let mut unresolved_references = Vec::new();
+    for event in root.preorder() {
+        let WalkEvent::Enter(element) = event else {
+            continue;
+        };
+        let Some(element) = ast::NameLike::cast(element) else {
+            continue;
+        };
+        let ast::NameLike::NameRef(name_ref) = element else {
+            continue;
+        };
+        if NameRefClass::classify(&sema, &name_ref).is_none() {
+            unresolved_references
+                .push(UnresolvedReference { range: name_ref.syntax().text_range() })
+        }
+    }
+    unresolved_references
 }
