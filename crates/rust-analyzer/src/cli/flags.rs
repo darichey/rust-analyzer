@@ -128,6 +128,8 @@ xflags::xflags! {
         cmd unresolved-references {
             /// Directory with Cargo.toml.
             required path: PathBuf
+            /// Include unresolved references in code which is inactive due to #[cfg] directives
+            optional --include-inactive-code
 
             /// Don't run build scripts or load `OUT_DIR` values by running `cargo check` before analysis.
             optional --disable-build-scripts
@@ -261,6 +263,7 @@ pub struct Diagnostics {
 #[derive(Debug)]
 pub struct UnresolvedReferences {
     pub path: PathBuf,
+    pub include_inactive_code: bool,
 
     pub disable_build_scripts: bool,
     pub disable_proc_macros: bool,

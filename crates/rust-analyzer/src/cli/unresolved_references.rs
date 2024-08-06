@@ -1,4 +1,4 @@
-use hir::{db::HirDatabase, Crate, HirFileIdExt as _, Module, Semantics};
+use hir::{db::HirDatabase, AnyDiagnostic, Crate, HirFileIdExt as _, Module, Semantics};
 use ide::{AnalysisHost, RootDatabase, TextRange};
 use ide_db::{
     base_db::SourceDatabaseExt as _, defs::NameRefClass, EditionedFileId, FxHashSet,
@@ -51,7 +51,28 @@ impl flags::UnresolvedReferences {
                 let line_index = db.line_index(file_id.into());
                 let file_text = db.file_text(file_id.into());
 
-                for unresolved_reference in find_unresolved_references(&db, file_id.into()) {
+                let mut unresolved_references = find_unresolved_references(&db, file_id.into());
+                if !self.include_inactive_code {
+                    let mut diagnostics = Vec::new();
+                    module.diagnostics(db, &mut diagnostics, false);
+                    for diagnostic in diagnostics {
+                        let AnyDiagnostic::InactiveCode(inactive_code) = diagnostic else {
+                            continue;
+                        };
+
+                        let node = inactive_code.node;
+
+                        if node.file_id != file_id {
+                            continue;
+                        }
+
+                        unresolved_references.retain(|unresolved_reference| {
+                            node.value.text_range().contains_range(unresolved_reference.range)
+                        });
+                    }
+                }
+
+                for unresolved_reference in unresolved_references {
                     let line_col = line_index.line_col(unresolved_reference.range.start());
                     let line = line_col.line + 1;
                     let col = line_col.col + 1;
