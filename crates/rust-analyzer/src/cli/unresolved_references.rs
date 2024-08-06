@@ -1,31 +1,15 @@
 use hir::{db::HirDatabase, Crate, HirFileIdExt as _, Module, Semantics};
-use ide::{
-    Analysis, AnalysisHost, AssistResolveStrategy, Diagnostic, DiagnosticsConfig, HighlightConfig,
-    RootDatabase, Severity, TextRange,
-};
+use ide::{AnalysisHost, RootDatabase, TextRange};
 use ide_db::{
     base_db::SourceDatabaseExt as _, defs::NameRefClass, EditionedFileId, FxHashSet,
     LineIndexDatabase as _,
 };
 use load_cargo::{load_workspace_at, LoadCargoConfig, ProcMacroServerChoice};
 use project_model::{CargoConfig, RustLibSource};
-use syntax::{ast, AstNode, SyntaxNode, WalkEvent};
+use syntax::{ast, AstNode, WalkEvent};
 use vfs::FileId;
 
 use crate::cli::flags;
-
-use super::flags::UnresolvedReferences;
-
-const HL_CONFIG: HighlightConfig = HighlightConfig {
-    strings: true,
-    punctuation: true,
-    specialize_punctuation: true,
-    specialize_operator: true,
-    operator: true,
-    inject_doc_comment: true,
-    macro_bang: true,
-    syntactic_name_ref_highlighting: false,
-};
 
 impl flags::UnresolvedReferences {
     pub fn run(self) -> anyhow::Result<()> {
@@ -46,7 +30,6 @@ impl flags::UnresolvedReferences {
             load_workspace_at(&self.path, &cargo_config, &load_cargo_config, &|_| {})?;
         let host = AnalysisHost::with_database(db);
         let db = host.raw_database();
-        let analysis = host.analysis();
 
         let mut visited_files = FxHashSet::default();
 
@@ -69,7 +52,6 @@ impl flags::UnresolvedReferences {
                 let file_text = db.file_text(file_id.into());
 
                 for unresolved_reference in find_unresolved_references(&db, file_id.into()) {
-                    // println!("{:?}", unresolved_reference.range);
                     let line_col = line_index.line_col(unresolved_reference.range.start());
                     let line = line_col.line + 1;
                     let col = line_col.col + 1;
