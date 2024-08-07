@@ -1,8 +1,9 @@
 use hir::{db::HirDatabase, AnyDiagnostic, Crate, HirFileIdExt as _, Module, Semantics};
 use ide::{AnalysisHost, RootDatabase, TextRange};
 use ide_db::{
-    base_db::SourceDatabaseExt as _, defs::NameRefClass, EditionedFileId, FxHashSet,
-    LineIndexDatabase as _,
+    base_db::{SourceDatabase, SourceRootDatabase},
+    defs::NameRefClass,
+    EditionedFileId, FxHashSet, LineIndexDatabase as _,
 };
 use load_cargo::{load_workspace_at, LoadCargoConfig, ProcMacroServerChoice};
 use project_model::{CargoConfig, RustLibSource};
