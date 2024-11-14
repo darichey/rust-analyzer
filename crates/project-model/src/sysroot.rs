@@ -336,7 +336,7 @@ impl Sysroot {
         ) {
             Ok(it) => it,
             Err(e) => {
-                tracing::error!("`cargo metadata` failed on `{library_manifest}` : {e}");
+                tracing::error!("`cargo metadata` failed on `{library_manifest}` : {e:#}");
                 return None;
             }
         };

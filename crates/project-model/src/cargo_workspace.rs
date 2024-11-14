@@ -279,7 +279,7 @@ impl CargoWorkspace {
         no_deps: bool,
         progress: &dyn Fn(String),
     ) -> anyhow::Result<(cargo_metadata::Metadata, Option<anyhow::Error>)> {
-        let targets = find_list_of_build_targets(config, cargo_toml, sysroot);
+        let targets = find_list_of_build_targets(config, cargo_toml, sysroot)?;
 
         let cargo = sysroot.tool(Tool::Cargo);
         let mut meta = MetadataCommand::new();
@@ -583,17 +583,17 @@ fn find_list_of_build_targets(
     config: &CargoConfig,
     cargo_toml: &ManifestPath,
     sysroot: &Sysroot,
-) -> Vec<String> {
+) -> anyhow::Result<Vec<String>> {
     if let Some(target) = &config.target {
-        return [target.into()].to_vec();
+        return Ok([target.into()].to_vec());
     }
 
-    let build_targets = cargo_config_build_target(cargo_toml, &config.extra_env, sysroot);
+    let build_targets = cargo_config_build_target(cargo_toml, &config.extra_env, sysroot)?;
     if !build_targets.is_empty() {
-        return build_targets;
+        return Ok(build_targets);
     }
 
-    rustc_discover_host_triple(cargo_toml, &config.extra_env, sysroot).into_iter().collect()
+    Ok(rustc_discover_host_triple(cargo_toml, &config.extra_env, sysroot).into_iter().collect())
 }
 
 fn rustc_discover_host_triple(
@@ -628,7 +628,7 @@ fn cargo_config_build_target(
     cargo_toml: &ManifestPath,
     extra_env: &FxHashMap<String, String>,
     sysroot: &Sysroot,
-) -> Vec<String> {
+) -> anyhow::Result<Vec<String>> {
     let mut cargo_config = sysroot.tool(Tool::Cargo);
     cargo_config.envs(extra_env);
     cargo_config
@@ -638,7 +638,9 @@ fn cargo_config_build_target(
     // if successful we receive `build.target = "target-triple"`
     // or `build.target = ["<target 1>", ..]`
     tracing::debug!("Discovering cargo config target by {:?}", cargo_config);
-    utf8_stdout(cargo_config).map(parse_output_cargo_config_build_target).unwrap_or_default()
+    utf8_stdout(cargo_config)
+        .map(parse_output_cargo_config_build_target)
+        .context("Failed to get `build.target`")
 }
 
 fn parse_output_cargo_config_build_target(stdout: String) -> Vec<String> {
