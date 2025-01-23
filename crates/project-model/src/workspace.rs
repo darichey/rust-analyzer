@@ -568,27 +568,15 @@ impl ProjectWorkspace {
         match &self.kind {
             ProjectWorkspaceKind::Json(project) => project
                 .crates()
-                .map(|(_, krate)| {
-                    // FIXME: PackageRoots dont allow specifying files, only directories
-                    let build_file = krate
-                        .build
-                        .as_ref()
-                        .map(|build| self.workspace_root().join(&build.build_file))
-                        .as_deref()
-                        .and_then(AbsPath::parent)
-                        .map(ToOwned::to_owned);
-
-                    PackageRoot {
-                        is_local: krate.is_workspace_member,
-                        include: krate
-                            .include
-                            .iter()
-                            .cloned()
-                            .chain(build_file)
-                            .chain(self.extra_includes.iter().cloned())
-                            .collect(),
-                        exclude: krate.exclude.clone(),
-                    }
+                .map(|(_, krate)| PackageRoot {
+                    is_local: krate.is_workspace_member,
+                    include: krate
+                        .include
+                        .iter()
+                        .cloned()
+                        .chain(self.extra_includes.iter().cloned())
+                        .collect(),
+                    exclude: krate.exclude.clone(),
                 })
                 .collect::<FxHashSet<_>>()
                 .into_iter()
